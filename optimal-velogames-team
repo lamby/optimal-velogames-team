@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+
+# http://www.velogames.com/tour-de-france/2015/rules.php
+
+##
+
+import urllib
+html = urllib.urlopen('http://www.velogames.com/tour-de-france/2015/riders.php').read()
+
+##
+
+from lxml import etree
+root = etree.HTML(html)
+
+##
+
+riders = [
+    {
+        y: x.xpath('.//*[@class="%s"]//text()' % y)[0]
+        for y in ('name', 'type', 'price')
+    }
+    for x in root.xpath('//ul[@class="list"]/li')
+]
+
+##
+
+html = urllib.urlopen('http://www.velogames.com/tour-de-france/2015/ridescore.php').read()
+root = etree.HTML(html)
+
+scores = {
+    x.xpath('.//*[@class="name"]//text()')[0]: \
+        int(x.xpath('.//*[@class="born"]//text()')[0].split(' ')[0])
+    for x in root.xpath('//ul[@class="list"]/li')
+}
+
+##
+
+variables = range(9)
+
+##
+
+import constraint
+
+problem = constraint.Problem()
+problem.addVariables(variables, [x['name'] for x in riders])
+
+##
+
+problem.addConstraint(constraint.AllDifferentConstraint())
+
+##
+
+import collections
+
+by_class = collections.defaultdict(set)
+for x in riders:
+    by_class[x['type']].add(x['name'])
+
+##
+
+import itertools
+
+for x, y in zip(variables, itertools.chain.from_iterable(
+    itertools.repeat(x, y) for x, y in (
+        ("All Rounder", 2),
+        ("Climber", 2),
+        ("Sprinter", 1),
+        ("Unclassed", 3),
+    )
+)):
+    problem.addConstraint(constraint.InSetConstraint(by_class[y]), (x,))
+
+##
+
+credits = {x['name']: int(x['price'].split(' ')[0]) for x in riders}
+
+problem.addConstraint(lambda *xs: sum(credits[x] for x in xs) <= 100)
+
+##
+
+max_score = 0
+
+for solution in problem.getSolutionIter():
+    score = sum(scores.get(x, 0) for x in solution.values())
+
+    if score <= max_score:
+        continue
+
+    for _, x in sorted(solution.iteritems()):
+        print '%s (%d points)' % (x, scores.get(x, 0))
+
+    print "Score: %d (total: %d)\n" % (
+        score,
+        sum(credits[x] for x in solution.values()),
+    )
+
+    max_score = score
